@@ -46,8 +46,8 @@ model, both WebAuthn flows (register + login, with crypto verification
 mocked), the `Image` model + cascade/signal cleanup, the upload endpoint
 (auth + CSRF), the Pillow pipeline (resize, WebP, EXIF-stripping), upload
 rejection (SVG / oversized / non-image), image→expand-link wrapping, the
-orphan-image sweep command, bearer-token note creation, idempotent API retries,
-and the bundled note-sharing skill client.
+orphan-image sweep command, bearer-token note creation, reading and updating,
+idempotent API retries, and the bundled note-sharing skill clients.
 
 ## URL map
 
@@ -57,6 +57,7 @@ and the bundled note-sharing skill client.
 | `/login/` | anon | Django login; also exposes passkey login |
 | `/new/` | authed | Editor for a new note |
 | `/api/v1/notes` | bearer token | POST JSON to create and share a note |
+| `/api/v1/notes/<slug>` | bearer token | GET a note's Markdown and HTML; PATCH to change it |
 | `/api/v1/notes/<slug>/comments[/<id>]` | bearer token | List, post and delete comments |
 | `/upload/` | authed | POST-only image upload (multipart), returns JSON `{url, markdown}` |
 | `/i/<short_id>.webp` | public | Serve a stored image |
@@ -112,6 +113,29 @@ password-protected and open to comments. Notes without a password are
 accessible to anyone who has or discovers their URL. Requests default to a
 1 MiB limit; override it with `NOTE_API_MAX_REQUEST_BYTES` if needed.
 
+### Reading and updating notes
+
+| Request | Scope | Does |
+| --- | --- | --- |
+| `GET /api/v1/notes/<slug>` | `notes:read` | Returns the note's settings plus its `markdown` source and rendered `html` |
+| `PATCH /api/v1/notes/<slug>` | `notes:write` | Changes only the fields sent; returns the note as `GET` does |
+
+Like the comments API, these act as the owner, so they ignore the note's
+password. `PATCH` accepts `markdown`, `title` (`null` clears it), `slug`,
+`comments_enabled`, `password` (sets a new one) and `clear_password: true`
+(removes it). It validates through the same `NoteForm` as the editor. A blank
+`slug` is refused, because it would give the note a new random URL. It has no
+`Idempotency-Key` support, since repeating the same change has the same result.
+Notes keep no revision history, so a client that replaces the Markdown should
+keep the previous source itself.
+
+```sh
+curl -X PATCH https://notes.tomd.org/api/v1/notes/abc123 \
+  -H "Authorization: Bearer $NOTES_TOMD_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"title":"Revised","comments_enabled":true}'
+```
+
 ### Comments
 
 | Request | Scope | Does |
@@ -130,23 +154,23 @@ source. Anchors are resolved in the reader's browser, so the API only reports
 `anchor.quote_in_note`: whether the quote currently appears verbatim in the
 note's rendered text.
 
-Tokens are created with `notes:create` only. Grant comment access when issuing
-a token, or to an existing one by its prefix (shown in Django admin) without
-changing the secret:
+Tokens are created with `notes:create` only. Grant read, edit and comment
+access when issuing a token, or to an existing one by its prefix (shown in
+Django admin) without changing the secret:
 
 ```sh
 python manage.py create_note_api_token --username tom --name Agent \
-  --scopes "notes:create comments:read comments:write"
+  --scopes "notes:create notes:read notes:write comments:read comments:write"
 python manage.py set_note_api_token_scopes --prefix nt_AbCdEf123 \
-  --scopes "notes:create comments:read comments:write"
+  --scopes "notes:create notes:read notes:write comments:read comments:write"
 ```
 
 The version-controlled personal skill is in `skills/share-notes/` and is also
 installed at `~/.codex/skills/share-notes/` on this machine. It triggers only
 on explicit sharing/publication requests and invokes its deterministic Python
 client, which uses the API's idempotency support for safe retries. Its
-`note_comments` script lists, posts, replies to and deletes comments through
-the endpoints above.
+`note_content` script reads and updates notes, and its `note_comments` script
+lists, posts, replies to and deletes comments, through the endpoints above.
 
 ## Deployment
 
@@ -252,8 +276,9 @@ fly.toml          legacy Fly config — unused since the move to Coolify
 - Password hashes use Django's `make_password`/`check_password`; raw values
   never stored.
 - Note API bearer tokens are high-entropy, stored only as SHA-256 digests,
-  scoped (`notes:create`, `comments:read`, `comments:write`; note creation
-  only by default), revocable, and never accepted from query strings.
+  scoped (`notes:create`, `notes:read`, `notes:write`, `comments:read`,
+  `comments:write`; note creation only by default), revocable, and never
+  accepted from query strings.
 - Unlock throttle: 3 wrong attempts per `(IP, slug, minute)` → 429.
 - WebAuthn RP ID is hardcoded to `notes.tomd.org` in `noteserver/settings.py`
   — passkeys registered in prod will not work against any other hostname

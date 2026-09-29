@@ -4,20 +4,35 @@
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
 DEFAULT_API_URL = "https://notes.tomd.org/api/v1/notes"
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 class ShareNoteError(Exception):
     pass
+
+
+def slug_from(value):
+    """Accept a bare slug or any URL of the note, and return the slug."""
+    value = (value or "").strip()
+    if "://" in value:
+        segments = [part for part in urlsplit(value).path.split("/") if part]
+        value = segments[0] if segments else ""
+    value = value.strip("/")
+    if not SLUG_RE.match(value):
+        raise ShareNoteError("Give the note as its slug or its notes.tomd.org URL.")
+    return value
 
 
 def parse_args(argv=None):

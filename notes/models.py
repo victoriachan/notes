@@ -130,7 +130,13 @@ class NoteApiToken(models.Model):
     last_used_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
 
-    KNOWN_SCOPES = ("notes:create", "comments:read", "comments:write")
+    KNOWN_SCOPES = (
+        "notes:create",
+        "notes:read",
+        "notes:write",
+        "comments:read",
+        "comments:write",
+    )
 
     class Meta:
         ordering = ["-created_at"]

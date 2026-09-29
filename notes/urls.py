@@ -7,6 +7,7 @@ app_name = "notes"
 urlpatterns = [
     path("", views.home, name="home"),
     path("api/v1/notes", views.api_create_note, name="api_create_note"),
+    path("api/v1/notes/<slug:slug>", views.api_note, name="api_note"),
     path(
         "api/v1/notes/<slug:slug>/comments",
         views.api_note_comments,

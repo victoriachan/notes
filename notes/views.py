@@ -291,6 +291,91 @@ def api_create_note(request):
     return _create_idempotently(token, idempotency_key, request_digest, create)
 
 
+NOTE_UPDATE_FIELDS = {"title", "markdown", "slug", "password", "clear_password", "comments_enabled"}
+
+
+def _note_update_data_or_error(payload, note):
+    """Overlay a PATCH payload on the note's current values as NoteForm data."""
+    data = {
+        "title": note.title,
+        "markdown": note.markdown,
+        "slug": note.slug,
+        "comments_enabled": note.comments_enabled,
+        "password": "",
+        "clear_password": False,
+    }
+    errors = {}
+    for field in ("title", "markdown", "slug", "password"):
+        if field not in payload:
+            continue
+        value = payload[field]
+        if field == "title" and value is None:
+            value = ""
+        if isinstance(value, str):
+            data[field] = value
+        else:
+            errors[field] = _invalid_field("Must be a string.")
+    for field in ("comments_enabled", "clear_password"):
+        if field not in payload:
+            continue
+        if isinstance(payload[field], bool):
+            data[field] = payload[field]
+        else:
+            errors[field] = _invalid_field("Must be true or false.")
+    # NoteForm treats a blank slug as "generate one", which would move the note.
+    if "slug" in payload and "slug" not in errors and not data["slug"].strip():
+        errors["slug"] = _invalid_field("Must not be empty; a note keeps its slug.")
+    if "password" in payload and "password" not in errors:
+        if not data["password"]:
+            errors["password"] = _invalid_field(
+                "Must not be empty; send clear_password to remove the password."
+            )
+        elif len(data["password"]) > 128:
+            errors["password"] = [
+                {"message": "Must be 128 characters or fewer.", "code": "max_length"}
+            ]
+        elif data["clear_password"]:
+            errors["password"] = _invalid_field(
+                "Send either password or clear_password, not both."
+            )
+    if errors:
+        return None, _validation_error(errors)
+    return data, None
+
+
+@csrf_exempt
+def api_note(request, slug):
+    """GET returns a note's Markdown and HTML; PATCH changes only the fields sent."""
+    if request.method not in ("GET", "PATCH"):
+        return _api_method_not_allowed("GET", "PATCH")
+    scope = "notes:read" if request.method == "GET" else "notes:write"
+    _, error = _api_token_or_error(request, scope)
+    if error:
+        return error
+    note = Note.objects.filter(slug=slug).first()
+    if note is None:
+        return _api_error("not_found", "No note has that slug.", status=404)
+
+    if request.method == "PATCH":
+        payload, error = _json_object_or_error(request)
+        if error:
+            return error
+        error = _unknown_fields_error(payload, NOTE_UPDATE_FIELDS)
+        if error:
+            return error
+        data, error = _note_update_data_or_error(payload, note)
+        if error:
+            return error
+        form = NoteForm(data, instance=note)
+        if not form.is_valid():
+            return _validation_error(form.errors.get_json_data(escape_html=True))
+        note = form.save()
+
+    return JsonResponse(
+        {**_note_api_response(request, note), "markdown": note.markdown, "html": note.html}
+    )
+
+
 def _note_text(note) -> str:
     """Best-effort rendered text of a note, used only to tell API clients
     whether a quote still appears in it. Real anchoring happens in the browser."""

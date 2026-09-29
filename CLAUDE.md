@@ -13,7 +13,7 @@ Deployment below.)
 
 ## Commands
 
-- Run tests: `python manage.py test notes` (334 tests, ~25s; the anchoring JS tests need `node`
+- Run tests: `python manage.py test notes` (375 tests, ~30s; the anchoring JS tests need `node`
   on PATH and are skipped without it)
 - Run a single test: `python manage.py test notes.tests.test_rendering.RenderMarkdownTests.test_strips_script_tags`
 - Dev server: `DEBUG=1 python manage.py runserver`
@@ -40,7 +40,8 @@ prod container — it already has production settings in its environment.
   `test_upload`, `test_comments_model`, `test_comments_views`,
   `test_comments_js` (runs `node --test notes/tests/js/anchors.test.mjs`),
   `test_api`, `test_api_comments`, `test_share_note_skill`,
-  `test_note_comments_skill`. Django's built-in `TestCase` — not pytest.
+  `test_note_comments_skill`, `test_note_content_skill`. Django's built-in
+  `TestCase` — not pytest.
 - Don't add new abstractions without a test that motivates them.
 
 ## Architecture gotchas
@@ -133,6 +134,14 @@ prod container — it already has production settings in its environment.
   stays in the browser. New scopes go in `NoteApiToken.KNOWN_SCOPES`; tokens
   default to `notes:create` only. The `skills/share-notes/` scripts are the
   API's main client — keep `SKILL.md` and the README in step with API changes.
+
+- **The note API reads and edits as the owner too.** `api_note` serves
+  `GET`/`PATCH /api/v1/notes/<slug>` behind `notes:read` / `notes:write`, also
+  without `_gate`. `PATCH` overlays the sent fields on the note's current
+  values and saves through `NoteForm(instance=note)`, so validation, re-render
+  and password hashing match the editor. It refuses a blank `slug`: `NoteForm`
+  passes `""` through and `Note.save()` would then generate a fresh slug,
+  silently moving the note to a new URL.
 
 ## SQLite on a volume — critical
 

@@ -4,30 +4,19 @@
 import argparse
 import json
 import os
-import re
 import sys
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
 
 # Reuse the publishing client's HTTP, retry and error handling.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from share_note import DEFAULT_API_URL, ShareNoteError, api_request, read_input  # noqa: E402
-
-
-SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-
-
-def slug_from(value):
-    """Accept a bare slug or any URL of the note, and return the slug."""
-    value = (value or "").strip()
-    if "://" in value:
-        segments = [part for part in urlsplit(value).path.split("/") if part]
-        value = segments[0] if segments else ""
-    value = value.strip("/")
-    if not SLUG_RE.match(value):
-        raise ShareNoteError("Give the note as its slug or its notes.tomd.org URL.")
-    return value
+from share_note import (  # noqa: E402
+    DEFAULT_API_URL,
+    ShareNoteError,
+    api_request,
+    read_input,
+    slug_from,
+)
 
 
 def comments_url(api_url, slug):

@@ -33,6 +33,10 @@ class BackupToR2Tests(TransactionTestCase):
 
         self.client = mock.Mock()
         self.client.upload_file.side_effect = fake_upload
+        self.existing_keys = []
+        self.client.get_paginator.return_value.paginate.side_effect = lambda **kw: [
+            {"Contents": [{"Key": k} for k in self.existing_keys + [u[1] for u in self.uploads]]}
+        ]
         patcher = mock.patch(
             "notes.management.commands.backup_to_r2.boto3.client",
             return_value=self.client,
@@ -94,6 +98,52 @@ class BackupToR2Tests(TransactionTestCase):
             with self.assertRaisesMessage(CommandError, "R2_SECRET_ACCESS_KEY"):
                 self._run(env)
         self.client.upload_file.assert_not_called()
+
+    def _deleted_keys(self):
+        return [
+            obj["Key"]
+            for call in self.client.delete_objects.call_args_list
+            for obj in call.kwargs["Delete"]["Objects"]
+        ]
+
+    def _old_backups(self, count):
+        # Keys sort oldest-first, and all predate the run's real timestamp.
+        return [f"notes-backups/notes-20260101T{i:06d}Z.tar.gz" for i in range(count)]
+
+    def test_keeps_only_the_newest_ten_backups_by_default(self):
+        self.existing_keys = self._old_backups(10) + ["notes-backups/readme.txt"]
+        self._run()
+        # 10 old + the new upload = 11, so only the single oldest goes.
+        self.assertEqual(self._deleted_keys(), self._old_backups(1))
+        self.assertEqual(self.client.delete_objects.call_args.kwargs["Bucket"], "backups")
+
+    def test_nothing_deleted_at_or_under_the_limit(self):
+        self.existing_keys = self._old_backups(9)
+        self._run()
+        self.client.delete_objects.assert_not_called()
+
+    def test_only_lists_under_the_prefix(self):
+        self._run()
+        self.client.get_paginator.return_value.paginate.assert_called_with(
+            Bucket="backups", Prefix="notes-backups/"
+        )
+
+    def test_keep_option_sets_how_many_survive(self):
+        self.existing_keys = self._old_backups(5)
+        self._run(R2_ENV, "--keep", "3")
+        self.assertEqual(self._deleted_keys(), self._old_backups(3))
+
+    def test_keep_zero_disables_pruning(self):
+        self.existing_keys = self._old_backups(20)
+        self._run(R2_ENV, "--keep", "0")
+        self.client.delete_objects.assert_not_called()
+
+    def test_failed_upload_deletes_nothing(self):
+        self.existing_keys = self._old_backups(20)
+        self.client.upload_file.side_effect = RuntimeError("R2 down")
+        with self.assertRaises(RuntimeError):
+            self._run()
+        self.client.delete_objects.assert_not_called()
 
     def test_no_temporary_files_left_behind(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch(

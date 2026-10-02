@@ -20,7 +20,7 @@ upstream merges stay clean — which is why many defaults, tests and the
 
 - Python env: a local `.venv` (git-ignored). Use `.venv/bin/python`, or
   activate it; the system Python lacks the dependencies.
-- Run tests: `.venv/bin/python manage.py test notes` (384 tests, ~30s; the
+- Run tests: `.venv/bin/python manage.py test notes` (390 tests, ~30s; the
   anchoring JS tests need `node` on PATH and are skipped without it)
 - Run a single test: `.venv/bin/python manage.py test notes.tests.test_rendering.RenderMarkdownTests.test_strips_script_tags`
 - Dev server: `DEBUG=1 .venv/bin/python manage.py runserver`
@@ -165,9 +165,13 @@ backups need the Pro plan, so backups go to Cloudflare R2 instead:
 `python manage.py backup_to_r2` snapshots the database with SQLite's online
 backup API (safe while the app runs), tars it with `media/`, and uploads
 `<R2_BUCKET_PREFIX>/notes-<stamp>.tar.gz` (prefix defaults to
-`notes-backups`). It needs `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`notes-backups`). After a successful upload it deletes all but the newest
+10 `notes-<stamp>.tar.gz` under the prefix (`--keep N`, `0` keeps all) — by
+count, not age, so if the schedule stops the last backups survive. It needs `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
 `R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME` in the Railway variables. Run it
-in prod with `railway ssh -- python manage.py backup_to_r2`. To restore,
+in prod with `railway ssh -- python manage.py backup_to_r2`; a launchd job on
+Victoria's Mac (`~/Library/LaunchAgents/uk.madebyvictoria.notes-backup.plist`,
+log `~/Library/Logs/notes-backup.log`) runs exactly that daily at 03:30. To restore,
 extract the archive and put `db.sqlite3` and `media/` back under `/app/data`.
 
 ## Deployment

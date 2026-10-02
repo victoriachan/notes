@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import tarfile
 import tempfile
@@ -9,6 +10,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+BACKUP_NAME_RE = re.compile(r"^notes-\d{8}T\d{6}Z\.tar\.gz$")
 REQUIRED_ENV = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME")
 
 
@@ -18,7 +20,15 @@ class Command(BaseCommand):
         "to Cloudflare R2 (configured by the R2_* environment variables)."
     )
 
-    def handle(self, *args, **kwargs):
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--keep",
+            type=int,
+            default=10,
+            help="After uploading, delete all but the newest N backups (default: 10; 0 keeps all).",
+        )
+
+    def handle(self, *args, keep, **kwargs):
         env = {name: os.environ.get(name, "").strip() for name in REQUIRED_ENV}
         missing = [name for name, value in env.items() if not value]
         if missing:
@@ -52,6 +62,33 @@ class Command(BaseCommand):
                 ExtraArgs={"ContentType": "application/gzip"},
             )
         self.stdout.write(f"Uploaded s3://{env['R2_BUCKET_NAME']}/{key}")
+        if keep > 0:
+            self._prune(client, env["R2_BUCKET_NAME"], prefix, keep)
+
+    def _prune(self, client, bucket, prefix, keep):
+        # Runs only after a successful upload, so a broken schedule never
+        # deletes the backups it has stopped replacing. Timestamped names
+        # sort chronologically.
+        list_prefix = f"{prefix}/" if prefix else ""
+        pages = client.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=list_prefix
+        )
+        keys = sorted(
+            obj["Key"]
+            for page in pages
+            for obj in page.get("Contents", [])
+            if BACKUP_NAME_RE.match(obj["Key"][len(list_prefix):])
+        )
+        stale = keys[:-keep]
+        # delete_objects accepts at most 1000 keys per request.
+        for start in range(0, len(stale), 1000):
+            batch = stale[start:start + 1000]
+            client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+            )
+        if stale:
+            self.stdout.write(f"Deleted {len(stale)} old backup(s), kept {keep}.")
 
     def _snapshot_database(self, path):
         # SQLite's online backup API gives a consistent copy while the app

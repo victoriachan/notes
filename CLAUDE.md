@@ -178,10 +178,9 @@ Custom domain `notes.madebyvictoria.uk` is a Cloudflare CNAME to Railway.
 
 - **No CI.** Railway deploys on every push to `main` and nothing runs the
   tests, so run them locally *before* pushing.
-- **Port:** `entrypoint.sh` binds gunicorn to `${PORT:-8000}`. Railway isn't
-  injecting `PORT`, so the app listens on 8000 and the custom domain's target
-  port in Railway is set to 8000. If you ever set `PORT`, change the domain's
-  target port to match or the site times out.
+- **Port:** `entrypoint.sh` binds gunicorn to `${PORT:-8000}`. The service sets
+  `PORT=8000` explicitly and the custom domain's target port is 8000. Keep the
+  two in step: if they differ, the site times out.
 - **Env vars** (Railway service → Variables): `SECRET_KEY`, `WEBAUTHN_RP_ID`,
   `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DB_PATH`, `RAILWAY_RUN_UID=0` (runs
   the container as root so SQLite can write to the root-owned volume), and

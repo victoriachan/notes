@@ -5,25 +5,28 @@ Guidance for Claude working in this repo. Read before making changes.
 ## What this is
 
 A single-user, self-hosted, gist-like Django app that serves markdown notes at
-`notes.tomd.org`. One Django project (`noteserver`), one app (`notes`), SQLite
-on a persistent volume, deployed on Coolify (`admin.co.tomd.org`) which
-auto-deploys on push to `main` via its GitHub App. (It used to run on Fly;
-`fly.toml` and some `fly`-named skills/scripts are now vestigial — see
-Deployment below.)
+`notes.madebyvictoria.uk`. One Django project (`noteserver`), one app
+(`notes`), SQLite on a persistent volume, deployed on Railway, which
+auto-deploys on push to `main`.
+
+This repo is Victoria's fork (`origin` = `victoriachan/notes`) of Tom Dyson's
+`notes.tomd.org` (`upstream` = `tomdyson/notes.tomd.org`, which Tom deploys on
+Coolify). Pull his changes with `git pull upstream main`; never push to
+`upstream`. Keep fork-specific behaviour in env vars rather than code so
+upstream merges stay clean — which is why many defaults, tests and the
+`share-notes` skill still say `notes.tomd.org`. `fly.toml` is vestigial.
 
 ## Commands
 
-- Run tests: `python manage.py test notes` (375 tests, ~30s; the anchoring JS tests need `node`
-  on PATH and are skipped without it)
-- Run a single test: `python manage.py test notes.tests.test_rendering.RenderMarkdownTests.test_strips_script_tags`
-- Dev server: `DEBUG=1 python manage.py runserver`
-- Migrations (local): `DEBUG=1 python manage.py migrate`
-- Deploy: push to `main` (Coolify's GitHub App builds + deploys). Manual deploy
-  via the Coolify UI, or the `coolify` CLI / skill.
-- Tail prod logs: `coolify app logs xok61kj0vasx16hv3xkv9qj9 -n 200` (the
-  `coolify` skill covers the CLI; that UUID is the `notes-tomd-org` app).
-- Run a management command in prod: the Coolify API can't exec ad-hoc commands,
-  so SSH the host and `docker exec` (see Deployment).
+- Python env: a local `.venv` (git-ignored). Use `.venv/bin/python`, or
+  activate it; the system Python lacks the dependencies.
+- Run tests: `.venv/bin/python manage.py test notes` (377 tests, ~30s; the
+  anchoring JS tests need `node` on PATH and are skipped without it)
+- Run a single test: `.venv/bin/python manage.py test notes.tests.test_rendering.RenderMarkdownTests.test_strips_script_tags`
+- Dev server: `DEBUG=1 .venv/bin/python manage.py runserver`
+- Migrations (local): `DEBUG=1 .venv/bin/python manage.py migrate`
+- Deploy: push to `main` (Railway builds the `Dockerfile` and deploys).
+- Prod logs / management commands: the `railway` CLI (see Deployment).
 
 `DEBUG=1` is needed for any management command that touches settings outside
 of `manage.py test` (tests auto-detect `test` in `argv`). Not needed in the
@@ -69,15 +72,17 @@ prod container — it already has production settings in its environment.
   requires `collectstatic` to run at Docker build time in non-DEBUG mode so
   the manifest exists. See `Dockerfile` — that's why the RUN line is
   `SECRET_KEY=build python manage.py collectstatic --noinput` (no DEBUG=1).
-- **Anonymous `/` returns 404.** The app is only for viewing individual notes
-  (or editing, if logged in). There is no public landing page and no "Log in"
-  link anywhere — Tom goes to `/login/` or `/admin/` directly. Anonymous
-  pages also render without a header at all; the header only appears for
-  authenticated users and contains just New note / Passkeys / Log out.
-- **Passkey auth is built on `py_webauthn`, with RP ID hardcoded.**
-  `WEBAUTHN_RP_ID = "notes.tomd.org"` in settings — do not swap this for a
-  request-derived value. A passkey is bound to the RP ID it was registered
-  against, so changing it silently invalidates every existing passkey.
+- **Anonymous `/` is a minimal public page.** `home()` renders
+  `home_public.html` (just a "Notes" card) with `show_public_header`, so the
+  header shows a single "Log in" link. Other anonymous pages render without a
+  header; for authenticated users it contains New note / Passkeys / Log out,
+  and `/` becomes the dashboard.
+- **Passkey auth is built on `py_webauthn`, with RP ID fixed per deployment.**
+  `WEBAUTHN_RP_ID` comes from the env var of the same name (default
+  `notes.tomd.org`; prod sets `notes.madebyvictoria.uk`) — do not swap this
+  for a request-derived value. A passkey is bound to the RP ID it was
+  registered against, so changing it silently invalidates every existing
+  passkey.
   `notes/passkey_views.py` holds the register/login ceremonies; state
   (challenge) lives in the session; `Passkey` rows belong to a user and
   store `credential_id`, `public_key`, `sign_count`.
@@ -153,46 +158,47 @@ detached one-off without the volume) would execute against an empty ephemeral
 file and silently succeed while doing nothing. Keep migrations in
 `entrypoint.sh`.
 
-The SQLite file lives on a Coolify-managed persistent volume mounted at
-`/app/data`; `DB_PATH` must point inside it (`/app/data/db.sqlite3`). Back the
-volume up at the Coolify/host level — there are no Fly volume snapshots anymore.
+The SQLite file lives on a Railway volume attached to the service at
+`/app/data`; `DB_PATH` must point inside it (`/app/data/db.sqlite3`). Uploaded
+images go to `/app/data/media` (derived from `DB_PATH`). Back up via the
+volume's Backups tab in Railway.
 
 ## Deployment
 
-Deployed on Coolify (`admin.co.tomd.org`); app `notes-tomd-org`, UUID
-`xok61kj0vasx16hv3xkv9qj9`, a single `dockerfile`-build container.
+Deployed on Railway as a single service built from the `Dockerfile`
+(`railway.toml` sets the builder, a `/login/` healthcheck and restart policy).
+Custom domain `notes.madebyvictoria.uk` is a Cloudflare CNAME to Railway.
 
-- **No CI.** Coolify's GitHub App builds and deploys on every push to `main`.
-  There is **no GitHub Actions workflow anymore** (the old `fly-deploy.yml` was
-  removed when the site left Fly), so **nothing runs the tests on push** — run
-  `python manage.py test notes` locally *before* pushing.
-- **Env / secrets** (`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `SECRET_KEY`,
-  `DB_PATH`, superuser vars) live in the Coolify app's Environment Variables
-  (Coolify UI, or `coolify app env`), **not** `fly secrets`. After changing
-  them, restart the app (`coolify app restart <uuid>`). `ALLOWED_HOSTS` and
-  `CSRF_TRUSTED_ORIGINS` must include every domain that serves the site — with
-  scheme for CSRF (`https://...`), without for ALLOWED_HOSTS.
-- **New domains:** add the FQDN to the Coolify app's Domains and a Cloudflare
-  CNAME, then update `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS` and restart. The
-  `assign-fly-subdomain` skill is Fly-specific and does **not** apply here.
-- **Running a management command in prod** (e.g. the `rerender_notes`
-  back-fill): the Coolify API can't exec ad-hoc commands, so SSH the host and
-  `docker exec`. The container name is `<uuid>-<digits>` and changes each
-  deploy, so resolve it first:
-  ```sh
-  ssh root@admin.co.tomd.org \
-    "docker exec \$(docker ps --format '{{.Names}}' | grep xok61kj0vasx16hv3xkv9qj9) \
-       python manage.py <command>"
-  ```
-  No `DEBUG=1` needed in the container.
+- **No CI.** Railway deploys on every push to `main` and nothing runs the
+  tests, so run them locally *before* pushing.
+- **Port:** `entrypoint.sh` binds gunicorn to `${PORT:-8000}`. Railway isn't
+  injecting `PORT`, so the app listens on 8000 and the custom domain's target
+  port in Railway is set to 8000. If you ever set `PORT`, change the domain's
+  target port to match or the site times out.
+- **Env vars** (Railway service → Variables): `SECRET_KEY`, `WEBAUTHN_RP_ID`,
+  `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DB_PATH`, `RAILWAY_RUN_UID=0` (runs
+  the container as root so SQLite can write to the root-owned volume), and
+  optionally `DJANGO_SUPERUSER_USERNAME`/`_PASSWORD` (when both are set,
+  `entrypoint.sh` creates the superuser or resets its password on each start).
+  `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` must include every domain that
+  serves the site — with scheme for CSRF (`https://...`), without for
+  ALLOWED_HOSTS. `healthcheck.railway.app` is always appended to
+  `ALLOWED_HOSTS` in settings, for Railway's healthcheck.
+- **Cloudflare:** if the record is proxied (orange cloud), SSL/TLS mode must
+  be Full or Full (strict), never Flexible.
+- **Prod logs / management commands:** `railway link` once in this directory,
+  then `railway logs`, and `railway ssh -- python manage.py <command>` (e.g.
+  `create_note_api_token`, `rerender_notes`). No `DEBUG=1` needed in the
+  container.
 
 ## Things NOT to do
 
 - Don't move migrations out of `entrypoint.sh` into a separate build/release
   step that doesn't mount the data volume (see SQLite note above).
-- Don't re-add a Fly deploy GitHub Action (the Fly app is stopped; Coolify
-  deploys via its GitHub App). If you want CI to run tests on push, add a
-  *test-only* workflow — don't resurrect Fly deploys.
+- Don't add a deploy GitHub Action — Railway deploys on push. If you want CI
+  to run tests on push, add a *test-only* workflow.
+- Don't push to `upstream` (Tom's repo); every push to his `main` deploys
+  `notes.tomd.org`.
 - Don't switch `STORAGES` away from `CompressedManifestStaticFilesStorage` in
   prod — if you do, update `Dockerfile` and ensure whitenoise can still serve.
 - Don't widen the bleach allowlist (`notes/rendering.py`) without a test that
@@ -202,7 +208,7 @@ Deployed on Coolify (`admin.co.tomd.org`); app `notes-tomd-org`, UUID
 - Don't change the shape of `generate_slug()` (6-char base62) without
   considering URL collisions with already-published notes. If you shorten it,
   collisions get likelier; if you lengthen it, old URLs still work.
-- Don't change `WEBAUTHN_RP_ID` away from `notes.tomd.org`, don't derive it
-  from the request host, and don't add the Coolify alt domain
-  (`notes-tomd-org.co.tomd.org`, or the old `.fly.dev`) as an alt origin —
-  every existing passkey would stop working.
+- Don't change prod's `WEBAUTHN_RP_ID` away from `notes.madebyvictoria.uk`,
+  don't derive it from the request host, and don't add the `*.up.railway.app`
+  domain as an alt origin — every existing passkey would stop working. Moving
+  hosts (e.g. to Coolify) is fine as long as the domain stays the same.

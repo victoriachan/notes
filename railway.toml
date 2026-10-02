@@ -1,0 +1,9 @@
+# Railway deploy config. Builds from the Dockerfile; entrypoint.sh runs
+# migrations (the volume is only mounted at runtime) and starts gunicorn on $PORT.
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+healthcheckPath = "/login/"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"

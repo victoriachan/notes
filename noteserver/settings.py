@@ -21,7 +21,7 @@ ALLOWED_HOSTS = [
     h.strip()
     for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
     if h.strip()
-]
+] + ["healthcheck.railway.app"]
 
 CSRF_TRUSTED_ORIGINS = [
     o.strip()
@@ -120,8 +120,8 @@ LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
-WEBAUTHN_RP_ID = "notes.tomd.org"
-WEBAUTHN_RP_NAME = "notes.tomd.org"
+WEBAUTHN_RP_ID = os.environ.get("WEBAUTHN_RP_ID", "notes.tomd.org")
+WEBAUTHN_RP_NAME = WEBAUTHN_RP_ID
 WEBAUTHN_ORIGIN = f"https://{WEBAUTHN_RP_ID}"
 
 SESSION_COOKIE_SECURE = not DEBUG

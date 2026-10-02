@@ -19,6 +19,44 @@ class PasskeySettingsTests(SimpleTestCase):
             f"https://{settings.WEBAUTHN_RP_ID}",
         )
 
+    def test_rp_id_can_be_set_from_environment(self):
+        values = _settings_in_subprocess(
+            {"WEBAUTHN_RP_ID": "notes.example.org"},
+            "WEBAUTHN_RP_ID", "WEBAUTHN_RP_NAME", "WEBAUTHN_ORIGIN",
+        )
+        self.assertEqual(
+            values,
+            ["notes.example.org", "notes.example.org", "https://notes.example.org"],
+        )
+
+    def test_railway_healthcheck_host_is_always_allowed(self):
+        (hosts,) = _settings_in_subprocess(
+            {"ALLOWED_HOSTS": "notes.example.org"}, "ALLOWED_HOSTS"
+        )
+        self.assertEqual(hosts, ["notes.example.org", "healthcheck.railway.app"])
+
+
+def _settings_in_subprocess(env, *names):
+    """Import a fresh copy of the settings module under `env`."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import json, noteserver.settings as s;"
+        f"print(json.dumps([getattr(s, n) for n in {list(names)!r}]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "DEBUG": "1", **env},
+        cwd=settings.BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
 
 class PasskeyModelTests(TestCase):
     @classmethod

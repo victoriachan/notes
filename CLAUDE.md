@@ -20,7 +20,7 @@ upstream merges stay clean — which is why many defaults, tests and the
 
 - Python env: a local `.venv` (git-ignored). Use `.venv/bin/python`, or
   activate it; the system Python lacks the dependencies.
-- Run tests: `.venv/bin/python manage.py test notes` (377 tests, ~30s; the
+- Run tests: `.venv/bin/python manage.py test notes` (384 tests, ~30s; the
   anchoring JS tests need `node` on PATH and are skipped without it)
 - Run a single test: `.venv/bin/python manage.py test notes.tests.test_rendering.RenderMarkdownTests.test_strips_script_tags`
 - Dev server: `DEBUG=1 .venv/bin/python manage.py runserver`
@@ -43,7 +43,7 @@ prod container — it already has production settings in its environment.
   `test_upload`, `test_comments_model`, `test_comments_views`,
   `test_comments_js` (runs `node --test notes/tests/js/anchors.test.mjs`),
   `test_api`, `test_api_comments`, `test_share_note_skill`,
-  `test_note_comments_skill`, `test_note_content_skill`. Django's built-in
+  `test_note_comments_skill`, `test_note_content_skill`, `test_backup`. Django's built-in
   `TestCase` — not pytest.
 - Don't add new abstractions without a test that motivates them.
 
@@ -160,8 +160,15 @@ file and silently succeed while doing nothing. Keep migrations in
 
 The SQLite file lives on a Railway volume attached to the service at
 `/app/data`; `DB_PATH` must point inside it (`/app/data/db.sqlite3`). Uploaded
-images go to `/app/data/media` (derived from `DB_PATH`). Back up via the
-volume's Backups tab in Railway.
+images go to `/app/data/media` (derived from `DB_PATH`). Railway's volume
+backups need the Pro plan, so backups go to Cloudflare R2 instead:
+`python manage.py backup_to_r2` snapshots the database with SQLite's online
+backup API (safe while the app runs), tars it with `media/`, and uploads
+`<R2_BUCKET_PREFIX>/notes-<stamp>.tar.gz` (prefix defaults to
+`notes-backups`). It needs `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME` in the Railway variables. Run it
+in prod with `railway ssh -- python manage.py backup_to_r2`. To restore,
+extract the archive and put `db.sqlite3` and `media/` back under `/app/data`.
 
 ## Deployment
 

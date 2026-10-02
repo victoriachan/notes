@@ -1,14 +1,17 @@
-# notes.tomd.org
+# notes.madebyvictoria.uk
 
 Self-hosted, gist-like markdown notes. Paste markdown, get a clean shareable
 URL, optionally protect a note with a password.
 
-Live at https://notes.tomd.org/.
+Live at https://notes.madebyvictoria.uk/. This is a fork of Tom Dyson's
+[notes.tomd.org](https://github.com/tomdyson/notes.tomd.org) (the `upstream`
+remote); pull his changes with `git pull upstream main`. Fork-specific
+settings live in env vars, so many code defaults still say `notes.tomd.org`.
 
 ## Features
 
 - Single-user authoring (Django superuser), public/anonymous viewing
-- Custom slugs or auto-generated 6-char base62 IDs (`notes.tomd.org/aB3kLm`)
+- Custom slugs or auto-generated 6-char base62 IDs (`notes.madebyvictoria.uk/aB3kLm`)
 - Optional per-note passwords, session-scoped unlock, with IP+slug rate limiting
 - Live markdown preview in the editor (client-side `marked` + `DOMPurify` +
   Mermaid + Highlight.js); server-side `markdown` + `pygments` + `bleach` is
@@ -18,9 +21,10 @@ Live at https://notes.tomd.org/.
   longest edge at 2000px, strips EXIF, and stores on the persistent volume
 - Rendered images are wrapped in click-to-expand links
 - Raw source view at `/<slug>/raw`
-- Passkey (WebAuthn) auth alongside username/password, with RP ID hardcoded
-  to `notes.tomd.org`
-- Deployed on Coolify with SQLite on a persistent volume
+- Passkey (WebAuthn) auth alongside username/password, with the RP ID set per
+  deployment by `WEBAUTHN_RP_ID`
+- Deployed on Railway with SQLite on a persistent volume, backed up daily to
+  Cloudflare R2
 
 ## Local development
 
@@ -47,13 +51,14 @@ mocked), the `Image` model + cascade/signal cleanup, the upload endpoint
 (auth + CSRF), the Pillow pipeline (resize, WebP, EXIF-stripping), upload
 rejection (SVG / oversized / non-image), image→expand-link wrapping, the
 orphan-image sweep command, bearer-token note creation, reading and updating,
-idempotent API retries, and the bundled note-sharing skill clients.
+idempotent API retries, the bundled note-sharing skill clients, and the R2
+backup command (snapshot contents, upload, pruning).
 
 ## URL map
 
 | Path | Who | Purpose |
 |---|---|---|
-| `/` | authed | Dashboard (anonymous GET returns 404) |
+| `/` | public | Dashboard when logged in; a minimal page with a "Log in" link otherwise |
 | `/login/` | anon | Django login; also exposes passkey login |
 | `/new/` | authed | Editor for a new note |
 | `/api/v1/notes` | bearer token | POST JSON to create and share a note |
@@ -87,10 +92,10 @@ only when it is created.
 Create a token in the environment whose database the API will use:
 
 ```sh
-python manage.py create_note_api_token --username tom --name Codex
+python manage.py create_note_api_token --username victoria --name Codex
 ```
 
-In production, run that command inside the running Coolify container using the
+In production, run that command inside the running Railway container using the
 procedure under "Running a management command in prod" below. Store the
 printed token in the agent's secret/environment configuration as
 `NOTES_TOMD_TOKEN`; do not put it in this repository or in a skill file. Delete
@@ -99,7 +104,7 @@ the token in Django admin to revoke it.
 Example request:
 
 ```sh
-curl https://notes.tomd.org/api/v1/notes \
+curl https://notes.madebyvictoria.uk/api/v1/notes \
   -H "Authorization: Bearer $NOTES_TOMD_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
@@ -130,7 +135,7 @@ Notes keep no revision history, so a client that replaces the Markdown should
 keep the previous source itself.
 
 ```sh
-curl -X PATCH https://notes.tomd.org/api/v1/notes/abc123 \
+curl -X PATCH https://notes.madebyvictoria.uk/api/v1/notes/abc123 \
   -H "Authorization: Bearer $NOTES_TOMD_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"title":"Revised","comments_enabled":true}'
@@ -159,14 +164,17 @@ access when issuing a token, or to an existing one by its prefix (shown in
 Django admin) without changing the secret:
 
 ```sh
-python manage.py create_note_api_token --username tom --name Agent \
+python manage.py create_note_api_token --username victoria --name Agent \
   --scopes "notes:create notes:read notes:write comments:read comments:write"
 python manage.py set_note_api_token_scopes --prefix nt_AbCdEf123 \
   --scopes "notes:create notes:read notes:write comments:read comments:write"
 ```
 
-The version-controlled personal skill is in `skills/share-notes/` and is also
-installed at `~/.codex/skills/share-notes/` on this machine. It triggers only
+The version-controlled personal skill is in `skills/share-notes/` and is
+symlinked to `~/.claude/skills/share-notes/` on this machine. It reads
+`NOTES_TOMD_TOKEN` and `NOTES_TOMD_API_URL`
+(`https://notes.madebyvictoria.uk/api/v1/notes`) from `~/.zprofile`, which its
+wrapper scripts load. It triggers only
 on explicit sharing/publication requests and invokes its deterministic Python
 client, which uses the API's idempotency support for safe retries. Its
 `note_content` script reads and updates notes, and its `note_comments` script
@@ -174,48 +182,70 @@ lists, posts, replies to and deletes comments, through the endpoints above.
 
 ## Deployment
 
-Deployed on [Coolify](https://admin.co.tomd.org). Pushes to `main` are built and
-deployed automatically by Coolify's GitHub App. There is **no CI** — the old
-Fly GitHub Action was removed when the site migrated off Fly, so nothing runs
-the test suite on push; run `python manage.py test notes` locally first.
+Deployed on [Railway](https://railway.com) as a single service built from the
+`Dockerfile`. Pushes to `main` are built and deployed automatically. There is
+**no CI**, so nothing runs the test suite on push; run
+`python manage.py test notes` locally first. (`fly.toml` is a leftover from
+when the upstream site ran on Fly and is unused.)
 
-Manual deploy: the Coolify UI, or the `coolify` CLI. (It previously ran on Fly;
-`fly.toml` remains in the repo but is unused.)
+### Railway configuration
 
-### Coolify configuration
-
-- App `notes-tomd-org`, UUID `xok61kj0vasx16hv3xkv9qj9`, a single
-  `dockerfile`-build container
-- Persistent volume mounted at `/app/data`, SQLite DB at `/app/data/db.sqlite3`
+- `railway.toml` sets the Dockerfile builder, a `/login/` healthcheck (`/`
+  isn't used, to keep the check on a cheap page) and restart-on-failure
+- A volume mounted at `/app/data`, SQLite DB at `/app/data/db.sqlite3`
 - Uploaded images live alongside the DB at `/app/data/media/images/` —
   `MEDIA_ROOT` defaults to `dirname(DB_PATH)/media`, so setting `DB_PATH`
   pins the media dir onto the same volume automatically
 - Migrations run inside the app container at startup via `entrypoint.sh`; keep
   them there (a build/release step that doesn't mount the volume would migrate
   an empty DB — see CLAUDE.md)
-- `entrypoint.sh` also creates/updates the superuser idempotently from
-  `DJANGO_SUPERUSER_*` env vars
+- `entrypoint.sh` binds gunicorn to `$PORT` (default 8000) and creates/updates
+  the superuser idempotently when the `DJANGO_SUPERUSER_*` env vars are set
+- Custom domain `notes.madebyvictoria.uk`: a Cloudflare CNAME to the target
+  Railway gives, with the domain's target port set to **8000**. If the record
+  is proxied (orange cloud), Cloudflare's SSL/TLS mode must be Full or Full
+  (strict), never Flexible
+- `healthcheck.railway.app` is always added to `ALLOWED_HOSTS` in settings so
+  Railway's healthcheck isn't rejected
 
-### Required environment variables
+### Environment variables
 
-Set in the Coolify app's Environment Variables (UI or `coolify app env`), then
-restart the app:
+Set on the service's Variables tab. Railway stages changes, so **apply/deploy
+them** afterwards or they won't reach the container.
 
 - `SECRET_KEY` — Django secret key
 - `DB_PATH` — `/app/data/db.sqlite3`
-- `ALLOWED_HOSTS` — `notes.tomd.org,notes-tomd-org.co.tomd.org`
-- `CSRF_TRUSTED_ORIGINS` — `https://notes.tomd.org,https://notes-tomd-org.co.tomd.org`
-- `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD`
+- `PORT` — `8000`; must match the custom domain's target port, or the site
+  times out
+- `WEBAUTHN_RP_ID` — `notes.madebyvictoria.uk`. Passkeys are bound to this,
+  so changing it invalidates every registered passkey
+- `ALLOWED_HOSTS` — `notes.madebyvictoria.uk`
+- `CSRF_TRUSTED_ORIGINS` — `https://notes.madebyvictoria.uk`
+- `RAILWAY_RUN_UID` — `0`, so the container runs as root and SQLite can write
+  to the root-owned volume
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+  `R2_BUCKET_NAME` (`notes-madebyvictoria`), optional `R2_BUCKET_PREFIX`
+  (default `notes-backups`) — for backups, below
+- Optional `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL` /
+  `DJANGO_SUPERUSER_PASSWORD`. While both username and password are set, every
+  start resets that user's password to the variable, so remove the password
+  once you've logged in and registered a passkey
 
 ### Running a management command in prod
 
-Coolify's API can't exec ad-hoc commands, so SSH the host and `docker exec`. The
-container name is `<uuid>-<digits>` and changes each deploy, so resolve it first:
+With the Railway CLI logged in (`railway login`, in a normal terminal) and this
+directory linked (`railway link`):
 
 ```sh
-ssh root@admin.co.tomd.org \
-  "docker exec \$(docker ps --format '{{.Names}}' | grep xok61kj0vasx16hv3xkv9qj9) \
-     python manage.py <command>"
+railway logs
+railway ssh -- python manage.py <command>
+```
+
+Quote the whole remote command when an argument contains spaces, as the remote
+shell re-splits it:
+
+```sh
+railway ssh 'python manage.py create_note_api_token --username victoria --scopes "notes:create notes:read"'
 ```
 
 e.g. `rerender_notes` re-renders every note's stored HTML after a rendering
@@ -225,6 +255,47 @@ Optional image-tuning overrides (defaults fine for most cases):
 `MEDIA_ROOT`, `IMAGE_MAX_UPLOAD_BYTES` (default 10 MB),
 `IMAGE_MAX_DIMENSION` (default 2000 px), `IMAGE_WEBP_QUALITY` (default 85).
 The agent note API also accepts `NOTE_API_MAX_REQUEST_BYTES` (default 1 MiB).
+
+### Backups
+
+Railway's own volume backups need the Pro plan, so the database and images are
+backed up to Cloudflare R2 instead:
+
+```sh
+railway ssh -- python manage.py backup_to_r2            # keeps the newest 10
+railway ssh -- python manage.py backup_to_r2 --keep 30  # keep more
+railway ssh -- python manage.py backup_to_r2 --keep 0   # never delete
+```
+
+The command:
+
+1. snapshots the database with SQLite's online backup API, which is safe while
+   the app is serving;
+2. packs it with `media/` into `notes-<UTC timestamp>.tar.gz`;
+3. uploads it to `<R2_BUCKET_PREFIX>/` in `R2_BUCKET_NAME`;
+4. only then deletes the oldest `notes-*.tar.gz` under that prefix beyond
+   `--keep`. Pruning is by count, not age, so if backups stop running the last
+   ten are never expired out from under you. Other files in the bucket are
+   left alone.
+
+The R2 API token needs Object Read & Write on the bucket (upload, list and
+delete).
+
+**Schedule:** a launchd job on Victoria's Mac runs the command daily at 03:30
+(`~/Library/LaunchAgents/uk.madebyvictoria.notes-backup.plist`, logging to
+`~/Library/Logs/notes-backup.log`). launchd runs a missed job after the Mac
+wakes, but skips days it was off. It depends on the Railway CLI staying logged
+in; if backups stop, look for "Unauthorized" in the log and `railway login`
+again. To run one now:
+
+```sh
+launchctl kickstart gui/$(id -u)/uk.madebyvictoria.notes-backup
+```
+
+**Restore:** download an archive from the bucket, extract it
+(`tar -xzf notes-<stamp>.tar.gz` gives `db.sqlite3` and `media/`), and put both
+back under `/app/data` on the volume, or point a local `DB_PATH` at the
+extracted file to inspect it.
 
 ### TODO: schedule the orphan-image sweep
 
@@ -237,10 +308,9 @@ python manage.py sweep_orphan_images --hours 1 # shorter threshold
 python manage.py sweep_orphan_images --dry-run # report only
 ```
 
-Currently this has to be run manually. Wire it up as a Coolify scheduled task
-(daily, command `python manage.py sweep_orphan_images`, container field blank
-for this single-container app) so the volume doesn't slowly accumulate dead
-uploads. A note-delete already cascades its images, so the sweep only handles
+Currently this has to be run manually (`railway ssh -- python manage.py
+sweep_orphan_images`). It could join the daily launchd job so the volume
+doesn't slowly accumulate dead uploads. A note-delete already cascades its images, so the sweep only handles
 the "uploaded but never saved" case.
 
 ## Project layout
@@ -256,15 +326,16 @@ notes/            App
   views.py          note CRUD, public read, agent API, image upload/serve
   images.py         Pillow pipeline: validate, resize, WebP re-encode
   passkey_views.py  WebAuthn register / login / manage
-  management/commands/  maintenance commands + API token creation
+  management/commands/  maintenance commands, API token creation, R2 backups
   static/notes/     editor.js, passkeys.js, site.css, pygments.css
   templates/notes/  base.html + page templates
   tests/            Unit + integration tests
 skills/
-  share-notes/      Personal Codex skill + deterministic API client
+  share-notes/      Personal agent skill + deterministic API client
 Dockerfile        Python 3.13 slim; collectstatic at build with manifest storage
-entrypoint.sh     migrate + superuser sync + gunicorn
-fly.toml          legacy Fly config — unused since the move to Coolify
+entrypoint.sh     migrate + superuser sync + gunicorn on $PORT
+railway.toml      Railway build, healthcheck and restart policy
+fly.toml          legacy upstream Fly config — unused
 ```
 
 ## Security notes
@@ -280,9 +351,10 @@ fly.toml          legacy Fly config — unused since the move to Coolify
   `comments:write`; note creation only by default), revocable, and never
   accepted from query strings.
 - Unlock throttle: 3 wrong attempts per `(IP, slug, minute)` → 429.
-- WebAuthn RP ID is hardcoded to `notes.tomd.org` in `noteserver/settings.py`
-  — passkeys registered in prod will not work against any other hostname
-  (including the Coolify alt domain `notes-tomd-org.co.tomd.org`).
+- WebAuthn RP ID comes from `WEBAUTHN_RP_ID` (`notes.madebyvictoria.uk` in
+  prod) — passkeys registered in prod will not work against any other
+  hostname, including the `*.up.railway.app` domain. Moving hosts is fine as
+  long as the domain stays the same.
 - Image uploads are validated by Pillow's decoder (not by `Content-Type` or
   filename), re-encoded to WebP, and size-capped; SVG is explicitly rejected
   because bleach does not sanitise image bodies. Re-encoding strips EXIF.

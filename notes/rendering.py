@@ -264,6 +264,32 @@ def toggle_task_in_markdown(src: str, index: int):
     return src[: m.start(2)] + new_bracket + src[m.end(2) :]
 
 
+# Ids the note page itself uses around the note body (comments.html).
+_RESERVED_ID_RE = re.compile(r"comments|comment-\d+")
+# An id attribute inside a tag; text can't hold a raw "<", so code that merely
+# mentions id="..." is left alone.
+_TAG_ID_RE = re.compile(r'(<[a-zA-Z][^<>]*?\sid=")([^"]*)(")')
+
+
+def _rename_reserved_ids(html: str) -> str:
+    """Prefix note ids that would shadow the page's own, e.g. a "Comments"
+    heading, which would otherwise capture the comment rail's htmx swaps."""
+    taken = {m.group(2) for m in _TAG_ID_RE.finditer(html)}
+
+    def rename(match):
+        old = match.group(2)
+        if not _RESERVED_ID_RE.fullmatch(old):
+            return match.group(0)
+        new, n = f"note-{old}", 1
+        while new in taken:
+            n += 1
+            new = f"note-{old}_{n}"
+        taken.add(new)
+        return match.group(1) + new + match.group(3)
+
+    return _TAG_ID_RE.sub(rename, html)
+
+
 def render_markdown(src: str) -> str:
     src = _MERMAID_FENCE_RE.sub(_replace_mermaid_fence, src or "")
     src = _allow_marked_list_interruptions(src)
@@ -287,7 +313,7 @@ def render_markdown(src: str) -> str:
     )
     linker = Linker(callbacks=[_set_link_rel], parse_email=False)
     linked = linker.linkify(clean)
-    return _wrap_images_in_expand_links(linked)
+    return _rename_reserved_ids(_wrap_images_in_expand_links(linked))
 
 
 class _OutlineParser(HTMLParser):

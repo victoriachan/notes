@@ -297,3 +297,33 @@ class NoteOutlineTests(SimpleTestCase):
 
     def test_empty_when_no_headings(self):
         self.assertEqual(note_outline(render_markdown("just text")), [])
+
+
+class ReservedIdTests(SimpleTestCase):
+    """Note ids must not shadow the comment rail's ids on the same page."""
+
+    def test_comments_heading_does_not_take_the_comment_rail_id(self):
+        html = render_markdown("## Comments\n\ntext")
+        self.assertNotIn('id="comments"', html)
+        self.assertIn('<h2 id="note-comments">Comments</h2>', html)
+
+    def test_numbered_comment_heading_does_not_take_a_comment_id(self):
+        html = render_markdown("## Comment 12\r\n\r\ntext\r\n")
+        self.assertNotIn('id="comment-12"', html)
+        self.assertIn('id="note-comment-12"', html)
+
+    def test_raw_html_ids_are_renamed_too(self):
+        html = render_markdown('<div id="comments">x</div>')
+        self.assertNotIn('id="comments"', html)
+        self.assertIn('id="note-comments"', html)
+
+    def test_renamed_ids_stay_unique(self):
+        html = render_markdown("## Note comments\n\n## Comments\n\n## Comments\n")
+        ids = note_outline(html)
+        self.assertEqual(len({h["id"] for h in ids}), 3)
+        self.assertNotIn("comments", {h["id"] for h in ids})
+
+    def test_ordinary_ids_and_text_are_untouched(self):
+        html = render_markdown('## Commentary\n\nWrite `id="comments"` in code.')
+        self.assertIn('id="commentary"', html)
+        self.assertIn('id="comments"</code>', html.replace("&quot;", '"'))

@@ -61,6 +61,10 @@ prod container — it already has production settings in its environment.
   is `marked` + `DOMPurify` (client-side), but the stored `html` field is
   what readers see. Always sanitise through `notes/rendering.py`; don't add
   new tag/attr allowances without thinking about XSS.
+  `render_markdown` prefixes any note id that matches the page's own
+  (`comments`, `comment-<n>`) with `note-`, so a "Comments" heading can't
+  capture the comment rail's htmx swaps. If the note page gains new ids
+  around the body, add them to `_RESERVED_ID_RE`.
 - **Mermaid fences are pre-processed before markdown.** `render_markdown`
   rewrites ```` ```mermaid ```` blocks into `<div class="mermaid">…</div>`
   *before* handing the source to `markdown` so pygments never sees them.

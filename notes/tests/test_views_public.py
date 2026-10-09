@@ -100,3 +100,11 @@ class NoteContentsTests(TestCase):
         r = self.client.get("/plain/")
         self.assertNotContains(r, "note-toc-layout")
         self.assertNotContains(r, "max-w-7xl")
+
+
+class ReservedIdViewTests(TestCase):
+    def test_comments_heading_leaves_one_comments_id_on_the_page(self):
+        Note.objects.create(slug="clash", markdown="## Comments\n\n## Other", comments_enabled=True)
+        body = self.client.get("/clash/").content.decode()
+        self.assertEqual(body.count('id="comments"'), 1)
+        self.assertIn('href="#note-comments"', body)

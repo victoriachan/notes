@@ -83,3 +83,22 @@ class TitleFallbackTests(TestCase):
         css = Path("notes/static/notes/site.css").read_text()
         self.assertIn(".note-body > :first-child", css)
         self.assertIn("margin-top: 0", css)
+
+
+class FaviconTests(TestCase):
+    def test_pages_link_the_music_note_favicons(self):
+        Note.objects.create(slug="hi", markdown="# body")
+        for path in ("/", "/login/", "/hi/"):
+            r = self.client.get(path)
+            self.assertContains(
+                r, 'rel="icon" type="image/svg+xml" href="/static/notes/favicon.svg"'
+            )
+            self.assertContains(
+                r, 'rel="apple-touch-icon" href="/static/notes/apple-touch-icon.png"'
+            )
+
+    def test_favicon_files_exist(self):
+        from django.contrib.staticfiles import finders
+
+        self.assertIsNotNone(finders.find("notes/favicon.svg"))
+        self.assertIsNotNone(finders.find("notes/apple-touch-icon.png"))

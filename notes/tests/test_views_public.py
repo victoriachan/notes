@@ -67,3 +67,36 @@ class UrlShadowingTests(TestCase):
         # /new/ requires login; expect redirect to /login/, not the note content.
         self.assertEqual(r.status_code, 302)
         self.assertIn("/login/", r["Location"])
+
+
+class NoteContentsTests(TestCase):
+    def test_note_with_two_headings_links_each_section(self):
+        Note.objects.create(slug="toc", markdown="## Alpha\n\ntext\n\n## Beta *b*\n\nmore")
+        r = self.client.get("/toc/")
+        self.assertContains(r, "data-note-toc")
+        self.assertContains(r, 'href="#alpha"')
+        self.assertContains(r, 'href="#beta-b"')
+        self.assertContains(r, ">Beta b</a>")
+
+    def test_note_with_one_heading_has_no_contents(self):
+        Note.objects.create(slug="one", markdown="## Only\n\ntext")
+        r = self.client.get("/one/")
+        self.assertNotContains(r, "data-note-toc")
+
+    def test_contents_sit_in_the_side_column_without_comments(self):
+        Note.objects.create(slug="toc", markdown="## Alpha\n\n## Beta", comments_enabled=False)
+        r = self.client.get("/toc/")
+        self.assertContains(r, "note-toc-layout")
+        self.assertContains(r, "max-w-7xl")
+
+    def test_contents_sit_above_the_comment_rail(self):
+        Note.objects.create(slug="toc", markdown="## Alpha\n\n## Beta", comments_enabled=True)
+        body = self.client.get("/toc/").content.decode()
+        self.assertIn("note-toc-layout", body)
+        self.assertLess(body.index("data-note-toc"), body.index('id="comments"'))
+
+    def test_note_without_contents_keeps_its_layout(self):
+        Note.objects.create(slug="plain", markdown="text", comments_enabled=False)
+        r = self.client.get("/plain/")
+        self.assertNotContains(r, "note-toc-layout")
+        self.assertNotContains(r, "max-w-7xl")

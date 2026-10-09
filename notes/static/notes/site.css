@@ -142,6 +142,24 @@ h1, h2, h3, h4, h5, h6 {
   margin-left: auto;
   margin-right: auto;
 }
+.note-toc > summary {
+  list-style: none;
+}
+.note-toc > summary::-webkit-details-marker {
+  display: none;
+}
+.note-toc[open] > summary {
+  border-bottom: 1px solid #e7e2d7;
+}
+.note-toc[open] .note-toc-icon {
+  transform: rotate(180deg);
+}
+.note-toc-icon {
+  transition: transform 150ms ease;
+}
+.note-body :is(h1, h2, h3) { scroll-margin-top: 1.5rem; }
+.note-toc-depth-1 { padding-left: 0.75rem; }
+.note-toc-depth-2 { padding-left: 1.5rem; }
 .comment-composer > summary {
   list-style: none;
 }
@@ -188,6 +206,42 @@ h1, h2, h3, h4, h5, h6 {
   }
   .note-comments-layout--empty {
     grid-template-columns: minmax(0, 52rem) 14rem;
+  }
+  /* Contents list: top of the side column, beside an article spanning both
+     rows. Row 2 is 1fr so the article's height never stretches row 1 and
+     pushes the comment rail away from the contents. */
+  .note-toc-layout {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 1rem;
+    align-items: start;
+    justify-content: center;
+  }
+  .note-toc-layout:not(.note-comments-layout) {
+    grid-template-columns: minmax(0, 52rem) 14rem;
+  }
+  .note-toc-layout > article {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    max-width: none;
+    margin: 0;
+  }
+  .note-toc-layout > .note-toc {
+    grid-column: 2;
+    grid-row: 1;
+    margin-bottom: 0;
+  }
+  .note-toc-layout > .comment-rail {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  /* With no comment rail beneath it, the contents can follow the reader. */
+  .note-toc-layout:not(.note-comments-layout) > .note-toc {
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
   }
   .note-comments-layout .comment-rail [data-comment-quote] {
     display: none;

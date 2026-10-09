@@ -2,7 +2,22 @@
 {% load static %}
 {% block title %}{{ note.title|default:note.slug }}{% endblock %}
 {% block content %}
-<div class="note-view-layout{% if note.comments_enabled %} note-comments-layout{% if not comment_threads %} note-comments-layout--empty{% endif %}{% endif %}">
+<div class="note-view-layout{% if note.comments_enabled %} note-comments-layout{% if not comment_threads %} note-comments-layout--empty{% endif %}{% endif %}{% if note_outline %} note-toc-layout{% endif %}">
+{% if note_outline %}
+<details data-note-toc class="note-toc bg-white border border-stone-200 rounded-lg mb-4">
+  <summary class="flex items-center justify-between cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-stone-700 hover:text-stone-900">
+    Contents
+    <span aria-hidden="true" class="note-toc-icon text-stone-400">&#9662;</span>
+  </summary>
+  <nav aria-label="Contents" class="px-3 py-2">
+    <ol class="space-y-1 text-sm">
+      {% for heading in note_outline %}
+      <li class="note-toc-depth-{{ heading.depth }}"><a href="#{{ heading.id }}" class="block text-stone-500 hover:text-stone-900">{{ heading.text }}</a></li>
+      {% endfor %}
+    </ol>
+  </nav>
+</details>
+{% endif %}
 <article class="bg-white border border-stone-200 shadow-sm rounded-lg p-8 sm:p-10">
   {% if note.title %}<h1 class="font-serif text-3xl mb-6">{{ note.title }}</h1>{% endif %}
   <div class="prose prose-stone max-w-none note-body"
@@ -26,6 +41,14 @@
 {% endblock %}
 {% block body_extra %}
 <script src="{% static 'notes/relative_time.js' %}?v=1"></script>
+{% if note_outline %}
+<script>
+  (function () {
+    var toc = document.querySelector("[data-note-toc]");
+    if (toc && window.matchMedia("(min-width: 1200px)").matches) toc.open = true;
+  })();
+</script>
+{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script>
   document.addEventListener("DOMContentLoaded", function () {

@@ -1,5 +1,6 @@
 import re
 from html import escape
+from html.parser import HTMLParser
 
 import bleach
 import markdown
@@ -287,3 +288,46 @@ def render_markdown(src: str) -> str:
     linker = Linker(callbacks=[_set_link_rel], parse_email=False)
     linked = linker.linkify(clean)
     return _wrap_images_in_expand_links(linked)
+
+
+class _OutlineParser(HTMLParser):
+    LEVELS = {"h1": 1, "h2": 2, "h3": 3}
+
+    def __init__(self):
+        super().__init__()
+        self.headings = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.LEVELS and self._current is None:
+            self._current = {"id": dict(attrs).get("id"), "level": self.LEVELS[tag], "text": ""}
+
+    def handle_endtag(self, tag):
+        if tag in self.LEVELS and self._current is not None:
+            self.headings.append(self._current)
+            self._current = None
+
+    def handle_data(self, data):
+        if self._current is not None:
+            self._current["text"] += data
+
+
+def note_outline(html: str) -> list:
+    """The h1-h3 headings of rendered note HTML, for the contents list.
+
+    Each entry has the heading's id (from the markdown toc extension), its
+    plain text, and a depth relative to the shallowest heading present.
+    """
+    parser = _OutlineParser()
+    parser.feed(html or "")
+    headings = [
+        h for h in parser.headings
+        if h["id"] and " ".join(h["text"].split())
+    ]
+    if not headings:
+        return []
+    top = min(h["level"] for h in headings)
+    return [
+        {"id": h["id"], "text": " ".join(h["text"].split()), "depth": h["level"] - top}
+        for h in headings
+    ]

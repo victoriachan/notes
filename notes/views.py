@@ -24,7 +24,7 @@ from . import gate
 from .forms import CommentForm, NoteForm, UnlockForm
 from .images import ImageError, process_upload
 from .models import Comment, Image, Note, NoteApiIdempotencyRecord, NoteApiToken
-from .rendering import toggle_task_in_markdown
+from .rendering import note_outline, toggle_task_in_markdown
 
 
 COMMENT_RATE_LIMIT = 10  # posts per IP per note per minute
@@ -571,6 +571,14 @@ def _view_context(request, note, comment_form=None):
         if not comments_context["comment_threads"]:
             context["header_container_class"] += " note-header-width--empty"
         context.update(comments_context)
+    outline = note_outline(note.html)
+    if len(outline) >= 2:
+        context["note_outline"] = outline
+        if not note.comments_enabled:
+            context["container_class"] = "max-w-7xl"
+            context["header_container_class"] = (
+                "note-page-width note-header-width--comments note-header-width--empty"
+            )
     return context
 
 

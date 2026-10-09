@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from notes.rendering import render_markdown, toggle_task_in_markdown
+from notes.rendering import note_outline, render_markdown, toggle_task_in_markdown
 
 
 class RenderMarkdownTests(SimpleTestCase):
@@ -265,3 +265,35 @@ class ToggleTaskInMarkdownTests(SimpleTestCase):
         # "[ ]" inside a paragraph (no list marker) is not a task.
         src = "Look at [ ] this!\n"
         self.assertIsNone(toggle_task_in_markdown(src, 0))
+
+
+class NoteOutlineTests(SimpleTestCase):
+    def test_lists_h1_to_h3_with_ids_and_plain_text(self):
+        html = render_markdown("# Intro\n\n## Set *up*\n\n### Details\n\n#### Too deep\n")
+        self.assertEqual(
+            note_outline(html),
+            [
+                {"id": "intro", "text": "Intro", "depth": 0},
+                {"id": "set-up", "text": "Set up", "depth": 1},
+                {"id": "details", "text": "Details", "depth": 2},
+            ],
+        )
+
+    def test_depth_is_relative_to_the_shallowest_heading(self):
+        html = render_markdown("## One\n\n### One a\n\n## Two\n")
+        self.assertEqual([h["depth"] for h in note_outline(html)], [0, 1, 0])
+
+    def test_repeated_headings_keep_their_unique_ids(self):
+        html = render_markdown("## Notes\n\n## Notes\n")
+        self.assertEqual([h["id"] for h in note_outline(html)], ["notes", "notes_1"])
+
+    def test_skips_headings_without_an_id(self):
+        self.assertEqual(note_outline("<h2>No id</h2><h2 id=\"yes\">Yes</h2>"),
+                         [{"id": "yes", "text": "Yes", "depth": 0}])
+
+    def test_crlf_source(self):
+        html = render_markdown("## One\r\n\r\ntext\r\n\r\n## Two\r\n")
+        self.assertEqual([h["text"] for h in note_outline(html)], ["One", "Two"])
+
+    def test_empty_when_no_headings(self):
+        self.assertEqual(note_outline(render_markdown("just text")), [])
